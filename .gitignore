@@ -2,3 +2,6 @@ __pycache__/
 *.pyc
 *.egg-info/
 vault.db
+chatgpt-md/
+.claude/
+.mcp.json
