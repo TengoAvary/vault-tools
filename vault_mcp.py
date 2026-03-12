@@ -32,6 +32,11 @@ logging.getLogger("sentence_transformers").setLevel(logging.WARNING)
 
 from mcp.server.fastmcp import FastMCP, Context  # noqa: E402
 
+# Ensure embed_vault is importable regardless of working directory
+_TOOLS_DIR = str(Path(__file__).resolve().parent)
+if _TOOLS_DIR not in sys.path:
+    sys.path.insert(0, _TOOLS_DIR)
+
 # ── Paths ──────────────────────────────────────────────────────────────────────
 
 def _resolve_paths() -> tuple[Path, Path]:
@@ -44,13 +49,7 @@ def _resolve_paths() -> tuple[Path, Path]:
         print(f"Error: '{vault_root}' is not a directory", file=sys.stderr)
         sys.exit(1)
     db_path = vault_root / ".vault-index" / "vault.db"
-    if not db_path.exists():
-        print(
-            f"Error: no index found at {db_path}\n"
-            f"Run: python3 embed_vault.py --vault '{vault_root}' to build it.",
-            file=sys.stderr,
-        )
-        sys.exit(1)
+    # DB may not exist yet — incremental_update will create it at startup
     return vault_root, db_path
 
 VAULT_ROOT, DB_PATH = _resolve_paths()
@@ -73,10 +72,15 @@ class VaultContext:
 async def lifespan(server: FastMCP) -> AsyncIterator[VaultContext]:
     import torch
     from sentence_transformers import SentenceTransformer
+    from embed_vault import incremental_update
 
     device = "mps" if torch.backends.mps.is_available() else "cpu"
     print(f"[vault_mcp] loading model on {device}…", file=sys.stderr)
     model = SentenceTransformer("all-MiniLM-L6-v2", device=device)
+
+    # Update index for any new/modified/deleted files, reusing the loaded model
+    print("[vault_mcp] checking for vault changes…", file=sys.stderr)
+    incremental_update(VAULT_ROOT, chunk_mode="sliding", model=model)
 
     print(f"[vault_mcp] loading embeddings from {DB_PATH}…", file=sys.stderr)
     con = sqlite3.connect(DB_PATH)
@@ -85,8 +89,12 @@ async def lifespan(server: FastMCP) -> AsyncIterator[VaultContext]:
     ).fetchall()
     con.close()
 
-    meta   = [(r[0], r[1], r[2], r[3]) for r in rows]
-    matrix = np.stack([np.frombuffer(r[4], dtype=np.float32) for r in rows])
+    if rows:
+        meta   = [(r[0], r[1], r[2], r[3]) for r in rows]
+        matrix = np.stack([np.frombuffer(r[4], dtype=np.float32) for r in rows])
+    else:
+        meta   = []
+        matrix = np.empty((0, 384), dtype=np.float32)
 
     n_files = len({r[1] for r in rows})
     print(f"[vault_mcp] ready — {len(rows)} chunks from {n_files} files", file=sys.stderr)
