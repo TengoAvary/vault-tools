@@ -2,6 +2,8 @@ __pycache__/
 *.pyc
 *.egg-info/
 vault.db
+vital_articles.db
 chatgpt-md/
 .claude/
 .mcp.json
+docs/superpowers/

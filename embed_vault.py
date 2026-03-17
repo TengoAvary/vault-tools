@@ -34,8 +34,9 @@ SKIP_DIRS      = {".vault-index", ".obsidian", ".git", ".claude", ".trash", "_to
 CHUNK_DELIMITER = "<!-- chunk -->"
 
 
-def iter_md_files(vault: Path):
-    for path in sorted(vault.rglob("*.md")):
+def iter_text_files(vault: Path):
+    paths = sorted([*vault.rglob("*.md"), *vault.rglob("*.txt")])
+    for path in paths:
         if any(part in SKIP_DIRS for part in path.parts):
             continue
         yield path
@@ -135,8 +136,8 @@ def build_db(vault: Path, chunk_mode: str = "sliding", model=None):
     con.execute("DROP TABLE IF EXISTS file_meta")
     _ensure_schema(con)
 
-    files = list(iter_md_files(vault))
-    print(f"Indexing {len(files)} markdown files (chunk mode: {chunk_mode})...",
+    files = list(iter_text_files(vault))
+    print(f"Indexing {len(files)} files (chunk mode: {chunk_mode})...",
           file=sys.stderr)
 
     rows = _embed_files(files, vault, model, chunk_mode)
@@ -176,7 +177,7 @@ def incremental_update(vault: Path, chunk_mode: str = "sliding", model=None):
 
     # Walk current vault files
     current_files = {}
-    for path in iter_md_files(vault):
+    for path in iter_text_files(vault):
         rel = str(path.relative_to(vault))
         current_files[rel] = path
 

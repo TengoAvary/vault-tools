@@ -276,9 +276,9 @@ def get_related_notes(file_path: str, top_k: int = 5, ctx: Context = None) -> st
 @mcp.tool()
 def read_note(file_path: str, ctx: Context = None) -> str:
     """
-    Read the full markdown content of a vault note.
-    file_path is relative to the vault root, e.g. 'Philosophy.md'
-    or 'Coding Curriculum/All lessons.md'.
+    Read the full content of a vault note (.md or .txt).
+    file_path is relative to the vault root, e.g. 'Philosophy.md',
+    'corpus/chapter1.txt', or 'Coding Curriculum/All lessons.md'.
     """
     vc: VaultContext = ctx.request_context.lifespan_context
     target = (vc.vault_root / file_path).resolve()
