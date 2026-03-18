@@ -101,6 +101,18 @@ If it shows `Failed to connect`, check:
 - `vault.db` was created in step 4
 - For Claude Desktop: check logs at `~/Library/Logs/Claude/mcp.log`
 
+## Development
+
+When modifying Python files in this repo, always run pylint and flake8 via the venv before considering the work done:
+
+```bash
+.venv/bin/pylint <changed-files>
+.venv/bin/flake8 <changed-files>
+.venv/bin/mypy <changed-files>
+```
+
+Fix any errors or warnings before committing.
+
 ## How it works
 
 - `embed_vault.py` chunks markdown files and embeds them with `all-MiniLM-L6-v2` into a SQLite database

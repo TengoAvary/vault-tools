@@ -48,7 +48,7 @@ def get_unnamed_clusters(
 def get_cluster_context(
     con: sqlite3.Connection, version_id: int, cluster_id: str
 ) -> tuple[list[str], list[str], list[str]]:
-    """Get tag names, chunk excerpts, and child cluster names for a cluster.
+    """Get tag names, chunk excerpts, and child cluster names.
 
     Returns (tag_names, chunk_excerpts, child_names).
     """
@@ -79,7 +79,8 @@ def get_cluster_context(
     # Get named child clusters
     children = con.execute(
         """SELECT name FROM clusters
-           WHERE version_id = ? AND parent_id = ? AND name IS NOT NULL
+           WHERE version_id = ? AND parent_id = ?
+           AND name IS NOT NULL
            ORDER BY tag_count DESC""",
         (version_id, cluster_id),
     ).fetchall()
@@ -105,14 +106,18 @@ def _extract_result(stdout: str) -> str:
         return parsed.get("result", "")
     elif isinstance(parsed, list):
         for event in parsed:
-            if isinstance(event, dict) and event.get("type") == "result":
-                return event.get("result", "")
+            if isinstance(event, dict):
+                if event.get("type") == "result":
+                    return event.get("result", "")
     return ""
 
 
 def _call_claude(prompt: str) -> str:
     """Call Claude CLI and return the result text."""
-    env = {k: v for k, v in os.environ.items() if k != "CLAUDECODE"}
+    env = {
+        k: v for k, v in os.environ.items()
+        if k != "CLAUDECODE"
+    }
 
     result = subprocess.run(
         [
@@ -127,17 +132,24 @@ def _call_claude(prompt: str) -> str:
         capture_output=True,
         text=True,
         env=env,
+        check=False,
     )
 
     if result.returncode != 0:
-        print(f"[name] claude error: {result.stderr}", file=sys.stderr)
+        print(
+            f"[name] claude error: {result.stderr}",
+            file=sys.stderr,
+        )
         return ""
 
     return _extract_result(result.stdout)
 
 
 def _parse_name_response(text: str) -> tuple[str, str] | None:
-    """Parse 'name | description' response. Returns None if format is invalid."""
+    """Parse 'name | description' response.
+
+    Returns None if format is invalid.
+    """
     text = text.replace("**", "").replace("*", "").strip()
     if "|" not in text:
         return None
@@ -150,30 +162,39 @@ def _parse_name_response(text: str) -> tuple[str, str] | None:
 
 
 def name_cluster(
-    tag_names: list[str], excerpts: list[str], child_names: list[str] | None = None
+    tag_names: list[str],
+    excerpts: list[str],
+    child_names: list[str] | None = None,
 ) -> tuple[str, str]:
-    """Use Claude CLI to name a cluster. Returns (name, description)."""
+    """Use Claude CLI to name a cluster.
+
+    Returns (name, description).
+    """
     tags_str = ", ".join(tag_names)
 
     if child_names:
-        # When children are named, use only those for a cleaner parent name
-        prompt = f"""Reply with EXACTLY this format, nothing else: name | description
-
-- name: 2-4 words naming the dominant theme
-- description: one sentence
-
-Name the cluster after the majority theme. Ignore outlier sub-topics that don't fit.
-
-Sub-topics: {', '.join(child_names)}"""
+        prompt = (
+            "Reply with EXACTLY this format, nothing else:"
+            " name | description\n\n"
+            "- name: 2-4 words naming the dominant theme\n"
+            "- description: one sentence\n\n"
+            "Name the cluster after the majority theme."
+            " Ignore outlier sub-topics that don't fit."
+            "\n\nSub-topics: " + ", ".join(child_names)
+        )
     else:
-        prompt = f"""Reply with EXACTLY this format, nothing else: name | description
-
-- name: 2-4 words naming the topic cluster
-- description: one sentence
-
-Tags: {tags_str}"""
+        prompt = (
+            "Reply with EXACTLY this format, nothing else:"
+            " name | description\n\n"
+            "- name: 2-4 words naming the topic cluster\n"
+            "- description: one sentence\n\n"
+            "Tags: " + tags_str
+        )
         if excerpts:
-            prompt += "\n\nSample text:\n" + "\n---\n".join(excerpts)
+            prompt += (
+                "\n\nSample text:\n"
+                + "\n---\n".join(excerpts)
+            )
 
     # Try up to 2 times
     for attempt in range(2):
@@ -184,21 +205,39 @@ Tags: {tags_str}"""
         if parsed:
             return parsed
         if attempt == 0:
-            print("[name]   retrying (bad format)…", file=sys.stderr)
+            print(
+                "[name]   retrying (bad format)…",
+                file=sys.stderr,
+            )
 
     return "Unknown", ""
 
 
-if __name__ == "__main__":
+def main():
+    """Name tag clusters using Claude CLI (Haiku)."""
     parser = argparse.ArgumentParser(
-        description="Name tag clusters using Claude CLI (Haiku)"
+        description=(
+            "Name tag clusters using Claude CLI (Haiku)"
+        )
     )
-    parser.add_argument("--vault-db", required=True, type=Path,
-                        help="Path to vault.db (where clusters live)")
-    parser.add_argument("--depth", type=int, default=None,
-                        help="Only name clusters at this depth (default: all unnamed)")
-    parser.add_argument("--bottom-up", action="store_true",
-                        help="Name deepest clusters first, then use child names to name parents")
+    parser.add_argument(
+        "--vault-db", required=True, type=Path,
+        help="Path to vault.db (where clusters live)",
+    )
+    parser.add_argument(
+        "--depth", type=int, default=None,
+        help=(
+            "Only name clusters at this depth"
+            " (default: all unnamed)"
+        ),
+    )
+    parser.add_argument(
+        "--bottom-up", action="store_true",
+        help=(
+            "Name deepest clusters first, then use"
+            " child names to name parents"
+        ),
+    )
     args = parser.parse_args()
 
     vault_db = args.vault_db.resolve()
@@ -211,75 +250,135 @@ if __name__ == "__main__":
     ).fetchone()[0]
 
     if version_id is None:
-        raise SystemExit("Error: no cluster versions found — run cluster_tags.py first")
+        raise SystemExit(
+            "Error: no cluster versions found"
+            " — run cluster_tags.py first"
+        )
 
     if args.bottom_up:
         # Get max depth, then name from deepest to shallowest
         max_depth = con.execute(
-            "SELECT MAX(depth) FROM clusters WHERE version_id = ?", (version_id,)
+            "SELECT MAX(depth) FROM clusters"
+            " WHERE version_id = ?",
+            (version_id,),
         ).fetchone()[0]
 
         total = 0
         for d in range(max_depth, -1, -1):
-            clusters = get_unnamed_clusters(con, version_id, depth=d)
+            clusters = get_unnamed_clusters(
+                con, version_id, depth=d,
+            )
             if not clusters:
                 continue
             total += len(clusters)
-            print(f"[name] depth {d}: {len(clusters)} clusters to name", file=sys.stderr)
+            print(
+                f"[name] depth {d}: "
+                f"{len(clusters)} clusters to name",
+                file=sys.stderr,
+            )
 
         if total == 0:
-            print("[name] all clusters already named", file=sys.stderr)
+            print(
+                "[name] all clusters already named",
+                file=sys.stderr,
+            )
             con.close()
             sys.exit(0)
 
         named = 0
         for d in range(max_depth, -1, -1):
-            clusters = get_unnamed_clusters(con, version_id, depth=d)
+            clusters = get_unnamed_clusters(
+                con, version_id, depth=d,
+            )
             for cluster in clusters:
                 named += 1
                 cid = cluster["cluster_id"]
-                tag_names, excerpts, child_names = get_cluster_context(con, version_id, cid)
+                tag_names, excerpts, child_names = (
+                    get_cluster_context(
+                        con, version_id, cid,
+                    )
+                )
 
-                print(f"[name] [{named}/{total}] cluster {cid} "
-                      f"({cluster['tag_count']} tags, depth {d})…",
-                      file=sys.stderr)
+                print(
+                    f"[name] [{named}/{total}]"
+                    f" cluster {cid}"
+                    f" ({cluster['tag_count']}"
+                    f" tags, depth {d})...",
+                    file=sys.stderr,
+                )
 
-                name, description = name_cluster(tag_names, excerpts, child_names)
+                name, description = name_cluster(
+                    tag_names, excerpts, child_names,
+                )
 
                 con.execute(
-                    "UPDATE clusters SET name = ?, description = ? WHERE version_id = ? AND cluster_id = ?",
+                    "UPDATE clusters"
+                    " SET name = ?, description = ?"
+                    " WHERE version_id = ?"
+                    " AND cluster_id = ?",
                     (name, description, version_id, cid),
                 )
                 con.commit()
 
-                print(f"[name]   → {name}", file=sys.stderr)
+                print(
+                    f"[name]   -> {name}",
+                    file=sys.stderr,
+                )
     else:
-        clusters = get_unnamed_clusters(con, version_id, args.depth)
+        clusters = get_unnamed_clusters(
+            con, version_id, args.depth,
+        )
         if not clusters:
-            print("[name] all clusters already named", file=sys.stderr)
+            print(
+                "[name] all clusters already named",
+                file=sys.stderr,
+            )
             con.close()
             sys.exit(0)
 
-        print(f"[name] naming {len(clusters)} clusters (version {version_id})…",
-              file=sys.stderr)
+        print(
+            f"[name] naming {len(clusters)}"
+            f" clusters (version {version_id})...",
+            file=sys.stderr,
+        )
 
         for i, cluster in enumerate(clusters, 1):
             cid = cluster["cluster_id"]
-            tag_names, excerpts, child_names = get_cluster_context(con, version_id, cid)
+            tag_names, excerpts, child_names = (
+                get_cluster_context(
+                    con, version_id, cid,
+                )
+            )
 
-            print(f"[name] [{i}/{len(clusters)}] cluster {cid} "
-                  f"({cluster['tag_count']} tags, depth {cluster['depth']})…",
-                  file=sys.stderr)
+            print(
+                f"[name] [{i}/{len(clusters)}]"
+                f" cluster {cid}"
+                f" ({cluster['tag_count']} tags,"
+                f" depth {cluster['depth']})...",
+                file=sys.stderr,
+            )
 
-            name, description = name_cluster(tag_names, excerpts, child_names)
+            name, description = name_cluster(
+                tag_names, excerpts, child_names,
+            )
 
             con.execute(
-                "UPDATE clusters SET name = ?, description = ? WHERE version_id = ? AND cluster_id = ?",
+                "UPDATE clusters"
+                " SET name = ?, description = ?"
+                " WHERE version_id = ?"
+                " AND cluster_id = ?",
                 (name, description, version_id, cid),
             )
             con.commit()
 
-            print(f"[name]   → {name}", file=sys.stderr)
+            print(
+                f"[name]   -> {name}",
+                file=sys.stderr,
+            )
 
     con.close()
     print("[name] done", file=sys.stderr)
+
+
+if __name__ == "__main__":
+    main()

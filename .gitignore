@@ -6,4 +6,4 @@ vital_articles.db
 chatgpt-md/
 .claude/
 .mcp.json
-docs/superpowers/
+.venv/
